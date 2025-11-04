@@ -7,11 +7,15 @@ import com.uade.tpo.Scrims.model.domain.User;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.ScrimRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.TeamRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.UserRepository;
+import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.uade.tpo.Scrims.view.dto.response.ScrimResponse;
+
+import jakarta.transaction.Transactional;
+
 import java.util.List;
 import java.util.stream.Collectors;
 import com.uade.tpo.Scrims.model.domain.Postulation;
@@ -27,6 +31,10 @@ public class ScrimService {
     private PostulationRepository postulationRepository;
     @Autowired
     private TeamRepository teamRepository;
+    // Inyecta los beans de estado que creamos para que puedan acceder a los
+    // repositorios
+    @Autowired
+    private BuscandoJugadoresState buscandoJugadoresState;
 
     // 1. La firma del método ahora acepta un 'username'
     public Scrim createScrim(CreateScrimRequest request, String username) {
@@ -42,6 +50,7 @@ public class ScrimService {
         newScrim.setRangoMax(request.getRangoMax());
         newScrim.setFechaHora(request.getFechaHora());
         newScrim.setEstado("BUSCANDO_JUGADORES");
+        newScrim.setState(new BuscandoJugadoresState()); // <-- INICIALIZAMOS EL ESTADO
         newScrim.setCreador(creador); // Asignamos el creador correcto
 
         // Guardamos el scrim primero para que tenga un ID
@@ -108,36 +117,59 @@ public class ScrimService {
         return postulationRepository.save(newPostulation);
     }
 
+    @Transactional // Anotación para asegurar que todas las operaciones de BBDD se completen o
     public Postulation acceptPostulation(Long scrimId, Long postulationId, String creatorUsername) {
-        Scrim scrim = scrimRepository.findById(scrimId)
-                .orElseThrow(() -> new RuntimeException("Scrim no encontrado"));
-        User creator = userRepository.findByUsername(creatorUsername)
-                .orElseThrow(() -> new RuntimeException("Usuario creador no encontrado"));
 
-        // --- REGLA DE SEGURIDAD ---
-        // Verificamos que quien hace la petición es realmente el creador del scrim
-        if (!scrim.getCreador().getId().equals(creator.getId())) {
-            throw new RuntimeException("No tienes permiso para gestionar este scrim.");
-        }
+        // 1. --- BÚSQUEDA DE ENTIDADES ---
+        // Obtenemos todas las entidades necesarias de la base de datos.
+        Scrim scrim = scrimRepository.findById(scrimId)
+                .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
+
+        User creator = userRepository.findByUsername(creatorUsername)
+                .orElseThrow(() -> new RuntimeException("Usuario creador no encontrado: " + creatorUsername));
 
         Postulation postulation = postulationRepository.findById(postulationId)
-                .orElseThrow(() -> new RuntimeException("Postulación no encontrada"));
+                .orElseThrow(() -> new RuntimeException("Postulación no encontrada con ID: " + postulationId));
 
-        // Cambiamos el estado de la postulación
+        // 2. --- VERIFICACIÓN DE PERMISOS ---
+        // La regla de negocio más importante: solo el creador puede gestionar su scrim.
+        if (!scrim.getCreador().getId().equals(creator.getId())) {
+            // En una app real, aquí se lanzaría una excepción de seguridad más específica
+            // (ej. AccessDeniedException)
+            throw new RuntimeException("Acción no permitida: No eres el creador de este scrim.");
+        }
+
+        // 3. --- INTEGRACIÓN CON EL PATRÓN STATE ---
+        // El objeto 'scrim' cargado de la BBDD tiene un estado 'puro' (creado con
+        // 'new').
+        // Ese estado 'puro' no tiene sus dependencias (@Autowired) inyectadas.
+        // Aquí reemplazamos el estado 'puro' con el bean de estado gestionado por
+        // Spring,
+        // que sí tiene acceso a los repositorios.
+        if (scrim.getCurrentState() instanceof BuscandoJugadoresState) {
+            scrim.setCurrentState(buscandoJugadoresState);
+        }
+        // (Aquí irían otros 'else if' para otros estados que puedan manejar esta
+        // acción)
+
+        // 4. --- DELEGACIÓN DE LA LÓGICA ---
+        // El servicio ya no sabe CÓMO se acepta un jugador. Simplemente le dice al
+        // scrim que lo haga.
+        // El objeto de estado actual (BuscandoJugadoresState en este caso) se encargará
+        // de todo.
+        scrim.aceptarPostulacion(postulation.getPostulante());
+
+        // 5. --- PERSISTENCIA DE CAMBIOS ---
+        // Actualizamos el estado de la postulación a "ACEPTADA".
         postulation.setEstado("ACEPTADA");
+        postulationRepository.save(postulation);
 
-        // Añadimos al jugador al primer equipo que tenga espacio
-        // (Esta es una lógica simple, se puede hacer más compleja después)
-        List<Team> teams = teamRepository.findAll().stream()
-                .filter(team -> team.getScrim().getId().equals(scrimId)).toList();
+        // MUY IMPORTANTE: Guardamos el scrim para persistir cualquier cambio de estado
+        // que haya ocurrido dentro del objeto State (ej. cambiar de BUSCANDO a
+        // LOBBY_ARMADO).
+        scrimRepository.save(scrim);
 
-        Team teamToJoin = teams.get(0); // Lógica simple: unir al Equipo A
-        teamToJoin.getMiembros().add(postulation.getPostulante());
-        teamRepository.save(teamToJoin);
-
-        // TODO: Aquí iría la lógica para comprobar si el lobby está lleno y cambiar el
-        // estado del scrim
-
-        return postulationRepository.save(postulation);
+        // 6. --- DEVOLUCIÓN DEL RESULTADO ---
+        return postulation;
     }
 }
