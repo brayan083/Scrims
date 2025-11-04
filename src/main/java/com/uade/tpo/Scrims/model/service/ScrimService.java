@@ -8,8 +8,12 @@ import com.uade.tpo.Scrims.model.infrastructure.persistence.ScrimRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.TeamRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.UserRepository;
 import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
+import com.uade.tpo.Scrims.model.patterns.state.FinalizadoState;
 import com.uade.tpo.Scrims.model.patterns.state.LobbyArmadoState;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
+import com.uade.tpo.Scrims.view.dto.request.FinalizeScrimRequest;
+import com.uade.tpo.Scrims.view.dto.request.PlayerStatisticDTO;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -19,7 +23,10 @@ import jakarta.transaction.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
+
+import com.uade.tpo.Scrims.model.domain.Estadistica;
 import com.uade.tpo.Scrims.model.domain.Postulation;
+import com.uade.tpo.Scrims.model.infrastructure.persistence.EstadisticaRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.PostulationRepository;
 
 @Service
@@ -38,6 +45,9 @@ public class ScrimService {
     private BuscandoJugadoresState buscandoJugadoresState;
     @Autowired
     private LobbyArmadoState lobbyArmadoState;
+    @Autowired
+    private EstadisticaRepository estadisticaRepository;
+
 
     // 1. La firma del método ahora acepta un 'username'
     @Transactional // Es bueno usarlo aquí también
@@ -198,5 +208,55 @@ public class ScrimService {
 
         // Guardamos el scrim para persistir el cambio de estado si ocurre
         scrimRepository.save(scrim);
+    }
+
+    @Transactional
+    public void finalizeScrim(Long scrimId, FinalizeScrimRequest request, String username) {
+        
+        // 1. --- BÚSQUEDA DE ENTIDADES Y VALIDACIÓN DE PERMISOS ---
+        Scrim scrim = scrimRepository.findById(scrimId)
+                .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
+
+        User creator = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuario creador no encontrado."));
+
+        if (!scrim.getCreador().getId().equals(creator.getId())) {
+            throw new RuntimeException("Acción no permitida: No eres el creador de este scrim.");
+        }
+
+        // 2. --- VALIDACIÓN DE ESTADO ---
+        // La finalización solo es posible si el scrim está actualmente "EN_JUEGO".
+        if (!"EN_JUEGO".equals(scrim.getEstado())) {
+            throw new IllegalStateException("El scrim no se puede finalizar porque no está en juego. Estado actual: " + scrim.getEstado());
+        }
+
+        // 3. --- LÓGICA DE NEGOCIO: CARGAR ESTADÍSTICAS ---
+        System.out.println("Finalizando Scrim ID: " + scrimId + ". Resultado: " + request.getResultado());
+
+        for (PlayerStatisticDTO statDTO : request.getPlayerStats()) {
+            // Buscamos al usuario correspondiente a la estadística
+            User player = userRepository.findById(statDTO.getUserId())
+                    .orElseThrow(() -> new RuntimeException("Jugador con ID " + statDTO.getUserId() + " no encontrado."));
+
+            // Creamos y guardamos la nueva entidad de estadística
+            Estadistica estadistica = new Estadistica();
+            estadistica.setScrim(scrim);
+            estadistica.setUser(player);
+            estadistica.setKda(statDTO.getKda());
+            estadistica.setMvp(statDTO.isMvp());
+
+            estadisticaRepository.save(estadistica);
+            System.out.println("Estadística guardada para el jugador: " + player.getUsername());
+        }
+
+        // 4. --- TRANSICIÓN DE ESTADO ---
+        // Cambiamos el estado del scrim a su estado terminal: FINALIZADO.
+        scrim.setState(new FinalizadoState());
+        scrimRepository.save(scrim);
+        
+        System.out.println("Scrim ID: " + scrimId + " ha sido movido al estado FINALIZADO.");
+
+        // TODO: Publicar un evento "ScrimFinalizadoEvent" para que el NotificationSubscriber
+        // pueda notificar a los jugadores sobre los resultados.
     }
 }

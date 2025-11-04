@@ -5,6 +5,9 @@ import com.uade.tpo.Scrims.model.domain.Scrim;
 import com.uade.tpo.Scrims.model.domain.Team;
 import com.uade.tpo.Scrims.model.domain.User;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.TeamRepository;
+import com.uade.tpo.Scrims.model.patterns.observer.DomainEventBus;
+import com.uade.tpo.Scrims.model.patterns.observer.ScrimStateChangedEvent;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.util.List;
@@ -15,6 +18,9 @@ public class BuscandoJugadoresState implements ScrimState {
     @Autowired
     private TeamRepository teamRepository; // Necesitamos acceso a los repositorios
 
+    @Autowired
+    private DomainEventBus eventBus;
+    
     @Override
     public void aceptarPostulacion(Scrim scrim, User postulante) {
         System.out.println("Aceptando jugador en estado BUSCANDO_JUGADORES...");
@@ -54,7 +60,11 @@ public class BuscandoJugadoresState implements ScrimState {
     
         if (totalJugadores >= maxJugadores) {
             System.out.println("¡Lobby lleno! Transicionando a LOBBY_ARMADO.");
-            scrim.setState(new LobbyArmadoState());
+            LobbyArmadoState nuevoEstado = new LobbyArmadoState();
+            scrim.setState(nuevoEstado);
+
+            // --- ¡PUBLICAMOS EL EVENTO! ---
+            eventBus.publish(new ScrimStateChangedEvent(scrim, "LOBBY_ARMADO"));
         }
     }
 

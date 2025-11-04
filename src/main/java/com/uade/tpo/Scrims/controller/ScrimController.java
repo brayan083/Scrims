@@ -5,6 +5,8 @@ import com.uade.tpo.Scrims.model.domain.Postulation;
 import com.uade.tpo.Scrims.model.domain.Scrim;
 import com.uade.tpo.Scrims.model.service.ScrimService;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
+import com.uade.tpo.Scrims.view.dto.request.FinalizeScrimRequest;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -63,6 +65,20 @@ public class ScrimController {
             scrimService.confirmParticipation(scrimId, principal.getName());
             return ResponseEntity.ok().body("Confirmación exitosa.");
         } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/{scrimId}/finalize")
+    public ResponseEntity<?> finalizeScrim(
+            @PathVariable Long scrimId,
+            @RequestBody FinalizeScrimRequest request,
+            Principal principal) {
+        try {
+            scrimService.finalizeScrim(scrimId, request, principal.getName());
+            return ResponseEntity.ok().body("Scrim finalizado y estadísticas cargadas correctamente.");
+        } catch (Exception e) {
+            // Devolvemos un mensaje de error claro al cliente
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }

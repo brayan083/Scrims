@@ -7,6 +7,9 @@ import java.time.LocalDateTime;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
+import com.uade.tpo.Scrims.model.patterns.state.ConfirmadoState;
+import com.uade.tpo.Scrims.model.patterns.state.EnJuegoState;
+import com.uade.tpo.Scrims.model.patterns.state.FinalizadoState;
 import com.uade.tpo.Scrims.model.patterns.state.LobbyArmadoState;
 import com.uade.tpo.Scrims.model.patterns.state.ScrimState;
 
@@ -36,10 +39,19 @@ public class Scrim {
 
     // Este método se ejecuta automáticamente después de que un Scrim se carga de la
     // BBDD
-    @PostLoad
+    @PostLoad // Se ejecuta después de que el objeto se carga de la BBDD
     private void initState() {
+        // La lógica del Scheduler usa el estado del String, así que esta parte
+        // es más para cuando manipulas el objeto en otras partes del código.
+        // Pero es bueno asegurarse de que esté completo.
         if ("LOBBY_ARMADO".equals(this.estado)) {
             this.currentState = new LobbyArmadoState();
+        } else if ("CONFIRMADO".equals(this.estado)) { // <-- Añadir este bloque
+            this.currentState = new ConfirmadoState();
+        } else if ("EN_JUEGO".equals(this.estado)) { // <-- Añadir este bloque
+            this.currentState = new EnJuegoState();
+        } else if ("FINALIZADO".equals(this.estado)) { // <-- Añadir este bloque
+            this.currentState = new FinalizadoState();
         } else {
             // Estado por defecto
             this.currentState = new BuscandoJugadoresState();
