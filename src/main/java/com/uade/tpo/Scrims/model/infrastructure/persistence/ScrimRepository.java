@@ -1,0 +1,10 @@
+// Fichero: model/infrastructure/persistence/ScrimRepository.java
+package com.uade.tpo.Scrims.model.infrastructure.persistence;
+
+import com.uade.tpo.Scrims.model.domain.Scrim;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface ScrimRepository extends JpaRepository<Scrim, Long> {
+}
