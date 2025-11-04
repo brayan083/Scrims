@@ -7,4 +7,6 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface PostulationRepository extends JpaRepository<Postulation, Long> {
+    // Devuelve true si ya existe una fila con este scrimId y este userId
+    boolean existsByScrimIdAndPostulanteId(Long scrimId, Long postulanteId);
 }

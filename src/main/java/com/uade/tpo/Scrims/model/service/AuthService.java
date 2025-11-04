@@ -23,11 +23,18 @@ public class AuthService {
     @Autowired
     private AuthenticationManager authenticationManager;
 
+    // Definimos una constante para el MMR inicial.
+    private static final int INITIAL_MMR = 10;
+
     public LoginResponse register(RegisterUserRequest request) {
         User newUser = new User();
         newUser.setUsername(request.getUsername());
         newUser.setEmail(request.getEmail());
         newUser.setPassword(passwordEncoder.encode(request.getPassword()));
+
+        // Asignamos el MMR inicial, ignorando lo que venga en el request.
+        newUser.setRango(INITIAL_MMR);
+
         userRepository.save(newUser);
 
         var jwtToken = jwtService.generateToken(newUser);
@@ -36,11 +43,9 @@ public class AuthService {
 
     public LoginResponse login(LoginRequest request) {
         authenticationManager.authenticate(
-            new UsernamePasswordAuthenticationToken(
-                request.getUsername(),
-                request.getPassword()
-            )
-        );
+                new UsernamePasswordAuthenticationToken(
+                        request.getUsername(),
+                        request.getPassword()));
         var user = userRepository.findByUsername(request.getUsername())
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
         var jwtToken = jwtService.generateToken(user);

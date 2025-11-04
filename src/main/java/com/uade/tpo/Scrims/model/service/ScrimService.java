@@ -48,6 +48,9 @@ public class ScrimService {
     @Autowired
     private EstadisticaRepository estadisticaRepository;
 
+    // Definimos una constante para el cambio de MMR
+    private static final int MMR_CHANGE_ON_WIN = 5;
+    private static final int MMR_CHANGE_ON_LOSS = -5;
 
     // 1. La firma del método ahora acepta un 'username'
     @Transactional // Es bueno usarlo aquí también
@@ -119,13 +122,28 @@ public class ScrimService {
         // --- REGLAS DE NEGOCIO ---
         // 1. Un usuario no puede postularse a su propio scrim
         if (scrim.getCreador().getId().equals(postulante.getId())) {
-            throw new RuntimeException("No puedes postularte a tu propio scrim.");
+            throw new IllegalStateException("No puedes postularte a tu propio scrim.");
         }
+
         // 2. El scrim debe estar buscando jugadores
         if (!"BUSCANDO_JUGADORES".equals(scrim.getEstado())) {
-            throw new RuntimeException("Este scrim no acepta postulaciones actualmente.");
+            throw new IllegalStateException("Este scrim no acepta postulaciones actualmente.");
         }
-        // (Aquí irían más validaciones, como la de rango, etc.)
+
+        // --- ¡NUEVA VALIDACIÓN DE DUPLICADOS! ---
+        if (postulationRepository.existsByScrimIdAndPostulanteId(scrimId, postulante.getId())) {
+            throw new IllegalStateException("Ya te has postulado a este scrim.");
+        }
+
+        // 3. --- ¡NUEVA VALIDACIÓN DE RANGO! ---
+        if (postulante.getRango() == null) {
+            throw new IllegalStateException("Tu perfil debe tener un rango para poder postularte.");
+        }
+        if (postulante.getRango() < scrim.getRangoMin() || postulante.getRango() > scrim.getRangoMax()) {
+            throw new IllegalStateException(
+                    "Tu rango (" + postulante.getRango() + ") no está dentro de los límites del scrim ["
+                            + scrim.getRangoMin() + "-" + scrim.getRangoMax() + "].");
+        }
 
         Postulation newPostulation = new Postulation();
         newPostulation.setScrim(scrim);
@@ -212,7 +230,7 @@ public class ScrimService {
 
     @Transactional
     public void finalizeScrim(Long scrimId, FinalizeScrimRequest request, String username) {
-        
+
         // 1. --- BÚSQUEDA DE ENTIDADES Y VALIDACIÓN DE PERMISOS ---
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
@@ -225,20 +243,18 @@ public class ScrimService {
         }
 
         // 2. --- VALIDACIÓN DE ESTADO ---
-        // La finalización solo es posible si el scrim está actualmente "EN_JUEGO".
         if (!"EN_JUEGO".equals(scrim.getEstado())) {
-            throw new IllegalStateException("El scrim no se puede finalizar porque no está en juego. Estado actual: " + scrim.getEstado());
+            throw new IllegalStateException(
+                    "El scrim no se puede finalizar porque no está en juego. Estado actual: " + scrim.getEstado());
         }
 
-        // 3. --- LÓGICA DE NEGOCIO: CARGAR ESTADÍSTICAS ---
+        // 3. --- CARGAR ESTADÍSTICAS ---
         System.out.println("Finalizando Scrim ID: " + scrimId + ". Resultado: " + request.getResultado());
-
         for (PlayerStatisticDTO statDTO : request.getPlayerStats()) {
-            // Buscamos al usuario correspondiente a la estadística
             User player = userRepository.findById(statDTO.getUserId())
-                    .orElseThrow(() -> new RuntimeException("Jugador con ID " + statDTO.getUserId() + " no encontrado."));
+                    .orElseThrow(
+                            () -> new RuntimeException("Jugador con ID " + statDTO.getUserId() + " no encontrado."));
 
-            // Creamos y guardamos la nueva entidad de estadística
             Estadistica estadistica = new Estadistica();
             estadistica.setScrim(scrim);
             estadistica.setUser(player);
@@ -249,14 +265,58 @@ public class ScrimService {
             System.out.println("Estadística guardada para el jugador: " + player.getUsername());
         }
 
-        // 4. --- TRANSICIÓN DE ESTADO ---
-        // Cambiamos el estado del scrim a su estado terminal: FINALIZADO.
+        // 4. --- RECALCULO DE MMR (RANGO) ---
+        List<Team> teams = teamRepository.findByScrimId(scrimId);
+        if (teams.size() < 2) {
+            throw new IllegalStateException(
+                    "El scrim no tiene los dos equipos configurados correctamente para calcular el MMR.");
+        }
+
+        Team teamA = teams.get(0);
+        Team teamB = teams.get(1);
+
+        List<User> ganadores;
+        List<User> perdedores;
+
+        if ("VICTORIA_EQUIPO_A".equalsIgnoreCase(request.getResultado())) {
+            ganadores = teamA.getMiembros();
+            perdedores = teamB.getMiembros();
+        } else if ("VICTORIA_EQUIPO_B".equalsIgnoreCase(request.getResultado())) {
+            ganadores = teamB.getMiembros();
+            perdedores = teamA.getMiembros();
+        } else {
+            System.out.println("Resultado es EMPATE o no reconocido. No se ajustará el MMR.");
+            // Si no hay un ganador claro, simplemente finalizamos el scrim sin cambiar
+            // rangos.
+            scrim.setState(new FinalizadoState());
+            scrimRepository.save(scrim);
+            return; // Salimos del método aquí.
+        }
+
+        System.out.println("--- Actualizando MMR ---");
+        for (User ganador : ganadores) {
+            int nuevoRango = ganador.getRango() + MMR_CHANGE_ON_WIN;
+            System.out.println(
+                    "Jugador " + ganador.getUsername() + " (ganador): " + ganador.getRango() + " -> " + nuevoRango);
+            ganador.setRango(nuevoRango);
+            userRepository.save(ganador);
+        }
+
+        for (User perdedor : perdedores) {
+            int nuevoRango = perdedor.getRango() + MMR_CHANGE_ON_LOSS;
+            if (nuevoRango < 0)
+                nuevoRango = 0; // El MMR no puede ser negativo.
+            System.out.println(
+                    "Jugador " + perdedor.getUsername() + " (perdedor): " + perdedor.getRango() + " -> " + nuevoRango);
+            perdedor.setRango(nuevoRango);
+            userRepository.save(perdedor);
+        }
+
+        // 5. --- TRANSICIÓN DE ESTADO FINAL ---
         scrim.setState(new FinalizadoState());
         scrimRepository.save(scrim);
-        
-        System.out.println("Scrim ID: " + scrimId + " ha sido movido al estado FINALIZADO.");
 
-        // TODO: Publicar un evento "ScrimFinalizadoEvent" para que el NotificationSubscriber
-        // pueda notificar a los jugadores sobre los resultados.
+        System.out.println("Scrim ID: " + scrimId + " ha sido movido al estado FINALIZADO.");
+        // TODO: Publicar un evento "ScrimFinalizadoEvent".
     }
 }

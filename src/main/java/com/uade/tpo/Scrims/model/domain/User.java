@@ -12,7 +12,7 @@ import java.util.List;
 @Entity
 @Table(name = "users") // Es buena práctica nombrar las tablas en plural
 @Data // Lombok genera getters, setters, toString, etc.
-public class User implements UserDetails{
+public class User implements UserDetails {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -25,6 +25,9 @@ public class User implements UserDetails{
 
     @Column(nullable = false)
     private String password;
+
+    // Añadimos el rango del jugador. Suponemos un valor numérico.
+    private Integer rango;
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
