@@ -54,7 +54,7 @@ public class ScrimService {
 
     // 1. La firma del método ahora acepta un 'username'
     @Transactional // Es bueno usarlo aquí también
-    public Scrim createScrim(CreateScrimRequest request, String username) {
+    public ScrimResponse createScrim(CreateScrimRequest request, String username) {
         User creador = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Creador no encontrado."));
 
@@ -88,7 +88,7 @@ public class ScrimService {
         teamB.setNombre("Equipo B");
         teamRepository.save(teamB);
 
-        return savedScrim;
+        return mapToScrimResponse(savedScrim);
     }
 
     public List<ScrimResponse> getAllScrims() {
@@ -108,7 +108,8 @@ public class ScrimService {
         response.setRangoMax(scrim.getRangoMax());
         response.setFechaHora(scrim.getFechaHora());
         response.setEstado(scrim.getEstado());
-        response.setCreadorUsername(scrim.getCreador().getUsername());
+        // Aquí está el campo clave que la prueba espera
+        response.setCreadorUsername(scrim.getCreador().getUsername()); 
         return response;
     }
 

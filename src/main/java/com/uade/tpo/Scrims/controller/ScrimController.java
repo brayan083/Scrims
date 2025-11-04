@@ -24,14 +24,10 @@ public class ScrimController {
     private ScrimService scrimService;
 
     @PostMapping
-    // 1. Añadimos Principal principal como parámetro
-    public ResponseEntity<Scrim> createScrim(@RequestBody CreateScrimRequest request, Principal principal) {
-        // 2. Obtenemos el username del usuario autenticado
+    public ResponseEntity<ScrimResponse> createScrim(@RequestBody CreateScrimRequest request, Principal principal) {
         String username = principal.getName();
-        
-        // 3. Pasamos el username al servicio
-        Scrim createdScrim = scrimService.createScrim(request, username);
-        
+        // El servicio ahora devuelve el DTO directamente
+        ScrimResponse createdScrim = scrimService.createScrim(request, username);
         return ResponseEntity.status(201).body(createdScrim);
     }
 
