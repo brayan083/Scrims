@@ -44,6 +44,19 @@ public class ScrimController {
         }
     }
 
+    @PostMapping("/{scrimId}/postulations/{postulationId}/accept")
+    public ResponseEntity<?> acceptPostulation(
+            @PathVariable Long scrimId,
+            @PathVariable Long postulationId,
+            Principal principal) {
+        try {
+            Postulation postulation = scrimService.acceptPostulation(scrimId, postulationId, principal.getName());
+            return ResponseEntity.ok(postulation);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     @GetMapping
     public ResponseEntity<List<ScrimResponse>> getAllScrims() {
         List<ScrimResponse> scrims = scrimService.getAllScrims();
