@@ -8,6 +8,7 @@ import com.uade.tpo.Scrims.model.infrastructure.persistence.ScrimRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.TeamRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.UserRepository;
 import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
+import com.uade.tpo.Scrims.model.patterns.state.LobbyArmadoState;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -35,12 +36,14 @@ public class ScrimService {
     // repositorios
     @Autowired
     private BuscandoJugadoresState buscandoJugadoresState;
+    @Autowired
+    private LobbyArmadoState lobbyArmadoState;
 
     // 1. La firma del método ahora acepta un 'username'
+    @Transactional // Es bueno usarlo aquí también
     public Scrim createScrim(CreateScrimRequest request, String username) {
-        // 2. Buscamos al usuario por su username, que es seguro y viene del token
         User creador = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Creador no encontrado. El token puede ser inválido."));
+                .orElseThrow(() -> new RuntimeException("Creador no encontrado."));
 
         Scrim newScrim = new Scrim();
         newScrim.setJuego(request.getJuego());
@@ -49,19 +52,24 @@ public class ScrimService {
         newScrim.setRangoMin(request.getRangoMin());
         newScrim.setRangoMax(request.getRangoMax());
         newScrim.setFechaHora(request.getFechaHora());
-        newScrim.setEstado("BUSCANDO_JUGADORES");
-        newScrim.setState(new BuscandoJugadoresState()); // <-- INICIALIZAMOS EL ESTADO
-        newScrim.setCreador(creador); // Asignamos el creador correcto
+        newScrim.setState(new BuscandoJugadoresState());
+        newScrim.setCreador(creador);
 
         // Guardamos el scrim primero para que tenga un ID
         Scrim savedScrim = scrimRepository.save(newScrim);
 
-        // Creamos los dos equipos para este scrim
+        // Creamos el Equipo A
         Team teamA = new Team();
         teamA.setScrim(savedScrim);
         teamA.setNombre("Equipo A");
-        teamRepository.save(teamA);
 
+        // --- ¡EL CAMBIO CLAVE ESTÁ AQUÍ! ---
+        // Añadimos al creador como el primer miembro del Equipo A.
+        teamA.getMiembros().add(creador);
+
+        teamRepository.save(teamA); // Guardamos el Equipo A con su primer miembro
+
+        // Creamos el Equipo B (vacío)
         Team teamB = new Team();
         teamB.setScrim(savedScrim);
         teamB.setNombre("Equipo B");
@@ -171,5 +179,24 @@ public class ScrimService {
 
         // 6. --- DEVOLUCIÓN DEL RESULTADO ---
         return postulation;
+    }
+
+    @Transactional
+    public void confirmParticipation(Long scrimId, String username) {
+        Scrim scrim = scrimRepository.findById(scrimId)
+                .orElseThrow(() -> new RuntimeException("Scrim no encontrado"));
+        User jugador = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
+
+        // Inyectamos las dependencias al estado actual
+        if (scrim.getCurrentState() instanceof LobbyArmadoState) {
+            scrim.setCurrentState(lobbyArmadoState);
+        }
+
+        // Delegamos la acción al estado
+        scrim.confirmarParticipacion(jugador);
+
+        // Guardamos el scrim para persistir el cambio de estado si ocurre
+        scrimRepository.save(scrim);
     }
 }

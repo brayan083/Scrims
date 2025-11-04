@@ -57,6 +57,16 @@ public class ScrimController {
         }
     }
 
+    @PostMapping("/{scrimId}/confirmations")
+    public ResponseEntity<?> confirmParticipation(@PathVariable Long scrimId, Principal principal) {
+        try {
+            scrimService.confirmParticipation(scrimId, principal.getName());
+            return ResponseEntity.ok().body("Confirmación exitosa.");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     @GetMapping
     public ResponseEntity<List<ScrimResponse>> getAllScrims() {
         List<ScrimResponse> scrims = scrimService.getAllScrims();
