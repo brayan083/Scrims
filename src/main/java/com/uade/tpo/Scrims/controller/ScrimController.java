@@ -2,7 +2,6 @@
 package com.uade.tpo.Scrims.controller;
 
 import com.uade.tpo.Scrims.model.domain.Postulation;
-import com.uade.tpo.Scrims.model.domain.Scrim;
 import com.uade.tpo.Scrims.model.service.ScrimService;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
 import com.uade.tpo.Scrims.view.dto.request.FinalizeScrimRequest;
