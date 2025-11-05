@@ -19,7 +19,7 @@ El sistema está construido siguiendo una arquitectura de microservicios robusta
 
 *   **Autenticación Segura:** Sistema de registro y login basado en tokens **JWT (JSON Web Tokens)**.
 *   **Creación de Scrims:** Los usuarios pueden crear partidas personalizadas, definiendo juego, formato, región y requisitos de rango.
-*   **Ciclo de Vida Completo:** Gestión automática y manual del estado de un scrim (`Buscando Jugadores`, `Lobby Armado`, `Confirmado`, `En Juego`, `Finalizado`) mediante el **Patrón State**.
+*   **Ciclo de Vida Completo:** Gestión automática y manual del estado de un scrim (`Buscando Jugadores`, `Lobby Armado`, `Confirmado`, `En Juego`, `Finalizado`, `Cancelado`) mediante el **Patrón State**.
 *   **Sistema de Lobbies y Equipos:** Los creadores pueden aceptar o rechazar postulantes para formar los equipos. El creador se une automáticamente a su propia partida.
 *   **MMR Dinámico:** Sistema de **recalculo de rango (MMR)** que se ajusta automáticamente según el resultado de cada scrim, promoviendo un matchmaking equilibrado.
 *   **Notificaciones Desacopladas:** Implementación del **Patrón Observer** para notificar a los jugadores sobre eventos clave (ej. lobby lleno), utilizando un sistema flexible basado en los patrones **Abstract Factory** y **Adapter**.
@@ -88,3 +88,5 @@ Puedes usar una herramienta como [Postman](https://www.postman.com/) para intera
 *   `POST /api/scrims/{scrimId}/postulations/{postId}/accept` - Acepta una postulación (solo para el creador).
 *   `POST /api/scrims/{id}/confirmations` - Confirma la participación en un lobby lleno (requiere token).
 *   `POST /api/scrims/{id}/finalize` - Finaliza una partida y carga las estadísticas (solo para el creador).
+*   `POST /api/scrims/{id}/cancelar` - **(Nuevo)** Cancela un scrim antes de que comience (solo para el creador).
+*   `GET /api/scrims/{id}/estadisticas` - **(Nuevo)** Obtiene las estadísticas de un scrim finalizado (requiere token).
