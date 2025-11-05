@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
 
+import com.uade.tpo.Scrims.view.dto.response.PostulationResponseDTO;
+import com.uade.tpo.Scrims.view.dto.response.ScrimDetailResponseDTO;
 import com.uade.tpo.Scrims.view.dto.response.ScrimResponse;
 import com.uade.tpo.Scrims.view.dto.response.StatisticResponseDTO;
 
@@ -101,8 +103,47 @@ public class ScrimController {
     }
 
     @GetMapping
-    public ResponseEntity<List<ScrimResponse>> getAllScrims() {
-        List<ScrimResponse> scrims = scrimService.getAllScrims();
+    public ResponseEntity<List<ScrimResponse>> searchScrims(
+            @RequestParam(required = false) String juego,
+            @RequestParam(required = false) String formato,
+            @RequestParam(required = false) String region,
+            @RequestParam(required = false) String estado) {
+        
+        // Pasamos los filtros al servicio
+        List<ScrimResponse> scrims = scrimService.searchScrims(juego, formato, region, estado);
         return ResponseEntity.ok(scrims);
     }
+
+    @GetMapping("/my-scrims")
+    public ResponseEntity<List<ScrimResponse>> getMyScrims(Principal principal) {
+        List<ScrimResponse> myScrims = scrimService.findScrimsByCreator(principal.getName());
+        return ResponseEntity.ok(myScrims);
+    }
+
+    @GetMapping("/my-participations")
+    public ResponseEntity<List<ScrimResponse>> getMyParticipations(Principal principal) {
+        List<ScrimResponse> participations = scrimService.findScrimsByParticipant(principal.getName());
+        return ResponseEntity.ok(participations);
+    }
+
+    @GetMapping("/{scrimId}")
+    public ResponseEntity<?> getScrimDetails(@PathVariable Long scrimId) {
+        try {
+            ScrimDetailResponseDTO scrimDetails = scrimService.getScrimDetails(scrimId);
+            return ResponseEntity.ok(scrimDetails);
+        } catch (Exception e) {
+            return ResponseEntity.status(404).body(e.getMessage()); // 404 Not Found si el scrim no existe
+        }
+    }
+
+
+    @GetMapping("/{scrimId}/postulations")
+    public ResponseEntity<?> getPostulationsForScrim(@PathVariable Long scrimId, Principal principal) {
+        try {
+            List<PostulationResponseDTO> postulations = scrimService.getPostulationsForScrim(scrimId, principal.getName());
+            return ResponseEntity.ok(postulations);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }   
 }

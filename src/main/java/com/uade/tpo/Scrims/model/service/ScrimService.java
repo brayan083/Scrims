@@ -5,6 +5,7 @@ import com.uade.tpo.Scrims.model.domain.Scrim;
 import com.uade.tpo.Scrims.model.domain.Team;
 import com.uade.tpo.Scrims.model.domain.User;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.ScrimRepository;
+import com.uade.tpo.Scrims.model.infrastructure.persistence.ScrimSpecification;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.TeamRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.UserRepository;
 import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
@@ -16,18 +17,25 @@ import com.uade.tpo.Scrims.view.dto.request.FinalizeScrimRequest;
 import com.uade.tpo.Scrims.view.dto.request.PlayerStatisticDTO;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
+import com.uade.tpo.Scrims.view.dto.response.PostulationResponseDTO;
+import com.uade.tpo.Scrims.view.dto.response.ScrimDetailResponseDTO;
 import com.uade.tpo.Scrims.view.dto.response.ScrimResponse;
 import com.uade.tpo.Scrims.view.dto.response.StatisticResponseDTO;
+import com.uade.tpo.Scrims.view.dto.response.TeamMemberResponseDTO;
+import com.uade.tpo.Scrims.view.dto.response.TeamResponseDTO;
 
 import jakarta.transaction.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.uade.tpo.Scrims.model.domain.Estadistica;
 import com.uade.tpo.Scrims.model.domain.Postulation;
+import com.uade.tpo.Scrims.model.infrastructure.persistence.ConfirmationRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.EstadisticaRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.PostulationRepository;
 
@@ -49,6 +57,9 @@ public class ScrimService {
     private LobbyArmadoState lobbyArmadoState;
     @Autowired
     private EstadisticaRepository estadisticaRepository;
+
+    @Autowired
+    private ConfirmationRepository confirmationRepository;
 
     // Definimos una constante para el cambio de MMR
     private static final int MMR_CHANGE_ON_WIN = 5;
@@ -93,10 +104,108 @@ public class ScrimService {
         return mapToScrimResponse(savedScrim);
     }
 
-    public List<ScrimResponse> getAllScrims() {
-        List<Scrim> scrims = scrimRepository.findAll();
-        // Convertimos cada entidad Scrim a un ScrimResponse DTO
+    public List<ScrimResponse> searchScrims(String juego, String formato, String region, String estado) {
+        // 1. Empezamos con una especificación base que no filtra NADA.
+        Specification<Scrim> spec = Specification.where(null);
+
+        // 2. Aplicamos el filtro de estado. Si no se proporciona, usamos el valor por
+        // defecto.
+        if (estado != null && !estado.isEmpty()) {
+            spec = spec.and(ScrimSpecification.tieneEstado(estado));
+        } else {
+            // COMPORTAMIENTO POR DEFECTO: Si no se pide un estado, mostramos solo las que
+            // buscan jugadores.
+            spec = spec.and(ScrimSpecification.tieneEstado("BUSCANDO_JUGADORES"));
+        }
+
+        // 3. Añadimos el resto de los filtros dinámicamente
+        if (juego != null && !juego.isEmpty()) {
+            spec = spec.and(ScrimSpecification.tieneJuego(juego));
+        }
+        if (formato != null && !formato.isEmpty()) {
+            spec = spec.and(ScrimSpecification.tieneFormato(formato));
+        }
+        if (region != null && !region.isEmpty()) {
+            spec = spec.and(ScrimSpecification.tieneRegion(region));
+        }
+
+        // ... (El resto del método para ejecutar la consulta y mapear a DTOs no cambia)
+        List<Scrim> scrims = scrimRepository.findAll(spec);
         return scrims.stream().map(this::mapToScrimResponse).collect(Collectors.toList());
+    }
+
+    public List<ScrimResponse> findScrimsByParticipant(String username) {
+        // 1. Buscamos al usuario que está haciendo la petición para obtener su ID
+        User participant = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado."));
+
+        // 2. Usamos el nuevo método del repositorio para obtener los scrims
+        List<Scrim> scrims = scrimRepository.findScrimsByParticipantId(participant.getId());
+
+        // 3. Mapeamos la lista de entidades a la lista de DTOs para la respuesta
+        return scrims.stream().map(this::mapToScrimResponse).collect(Collectors.toList());
+    }
+
+    public List<ScrimResponse> findScrimsByCreator(String username) {
+        User creator = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado."));
+
+        List<Scrim> scrims = scrimRepository.findByCreadorIdOrderByFechaHoraDesc(creator.getId());
+
+        return scrims.stream().map(this::mapToScrimResponse).collect(Collectors.toList());
+    }
+
+    public ScrimDetailResponseDTO getScrimDetails(Long scrimId) {
+        // 1. Buscamos el scrim principal
+        Scrim scrim = scrimRepository.findById(scrimId)
+                .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
+                // --- ¡MEJORA IMPORTANTE! ---
+        // Para ser eficientes, obtenemos TODAS las confirmaciones para este scrim
+        // en una sola consulta a la base de datos, en lugar de consultar por cada
+        // jugador.
+        // Creamos un Set de IDs de usuarios confirmados para una búsqueda rápida.
+        Set<Long> confirmedUserIds = confirmationRepository.findByScrimId(scrimId).stream()
+                .map(confirmation -> confirmation.getUser().getId())
+                .collect(Collectors.toSet());
+
+        // 2. Buscamos sus equipos asociados
+        List<Team> teams = teamRepository.findByScrimId(scrimId);
+
+        // 3. Mapeamos toda la información al DTO de detalle
+        ScrimDetailResponseDTO responseDTO = new ScrimDetailResponseDTO();
+        responseDTO.setId(scrim.getId());
+        responseDTO.setJuego(scrim.getJuego());
+        responseDTO.setFormato(scrim.getFormato());
+        responseDTO.setRegion(scrim.getRegion());
+        responseDTO.setRangoMin(scrim.getRangoMin());
+        responseDTO.setRangoMax(scrim.getRangoMax());
+        responseDTO.setFechaHora(scrim.getFechaHora());
+        responseDTO.setEstado(scrim.getEstado());
+        responseDTO.setCreadorUsername(scrim.getCreador().getUsername());
+
+        // Mapeamos la lista de equipos y sus miembros
+        List<TeamResponseDTO> teamDTOs = teams.stream().map(team -> {
+            TeamResponseDTO teamDTO = new TeamResponseDTO();
+            teamDTO.setId(team.getId());
+            teamDTO.setNombre(team.getNombre());
+
+            List<TeamMemberResponseDTO> memberDTOs = team.getMiembros().stream().map(member -> {
+                TeamMemberResponseDTO memberDTO = new TeamMemberResponseDTO();
+                memberDTO.setUserId(member.getId());
+                memberDTO.setUsername(member.getUsername());
+                memberDTO.setUserRank(member.getRango());
+                memberDTO.setHaConfirmado(confirmedUserIds.contains(member.getId()));
+                
+                return memberDTO;
+            }).collect(Collectors.toList());
+
+            teamDTO.setMiembros(memberDTOs);
+            return teamDTO;
+        }).collect(Collectors.toList());
+
+        responseDTO.setTeams(teamDTOs);
+
+        return responseDTO;
     }
 
     // Método de ayuda privado para la conversión
@@ -353,21 +462,51 @@ public class ScrimService {
     public List<StatisticResponseDTO> getScrimStatistics(Long scrimId) {
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
-    
+
         // 1. Verificación de estado
         if (!"FINALIZADO".equals(scrim.getEstado())) {
             throw new IllegalStateException("Las estadísticas solo están disponibles para scrims finalizados.");
         }
-    
+
         // 2. Búsqueda de estadísticas
         List<Estadistica> stats = estadisticaRepository.findByScrimId(scrimId);
-    
+
         // 3. Mapeo a DTOs
         return stats.stream().map(stat -> {
             StatisticResponseDTO dto = new StatisticResponseDTO();
             dto.setUsername(stat.getUser().getUsername());
             dto.setKda(stat.getKda());
             dto.setMvp(stat.isMvp());
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
+    public List<PostulationResponseDTO> getPostulationsForScrim(Long scrimId, String username) {
+        // 1. --- BÚSQUEDA Y VALIDACIÓN DE PERMISOS ---
+        Scrim scrim = scrimRepository.findById(scrimId)
+                .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
+        User requester = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado."));
+
+        if (!scrim.getCreador().getId().equals(requester.getId())) {
+            throw new RuntimeException("No tienes permiso para ver las postulaciones de este scrim.");
+        }
+
+        // 2. --- BÚSQUEDA DE DATOS ---
+        List<Postulation> postulations = postulationRepository.findByScrimId(scrimId);
+
+        // 3. --- MAPEADO A DTOs ---
+        // Convertimos la lista de entidades a una lista de DTOs para la respuesta
+        return postulations.stream().map(postulation -> {
+            PostulationResponseDTO dto = new PostulationResponseDTO();
+            User postulante = postulation.getPostulante();
+
+            dto.setPostulationId(postulation.getId());
+            dto.setUserId(postulante.getId());
+            dto.setUsername(postulante.getUsername());
+            dto.setUserRank(postulante.getRango());
+            dto.setStatus(postulation.getEstado());
+
             return dto;
         }).collect(Collectors.toList());
     }
