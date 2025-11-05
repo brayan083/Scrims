@@ -8,5 +8,6 @@ import com.uade.tpo.Scrims.model.domain.User;
 public interface ScrimState {
     void aceptarPostulacion(Scrim scrim, User postulante);
     void confirmarParticipacion(Scrim scrim, User jugador);
+    // void cancelar(Scrim scrim); // Podríamos añadirlo, pero es más simple manejarlo en el servicio.
     // ... aquí irían otros métodos como iniciarPartida(), finalizar(), cancelar(), etc.
 }

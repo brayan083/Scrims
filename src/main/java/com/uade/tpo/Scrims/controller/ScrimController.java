@@ -11,10 +11,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.security.Principal; 
+import java.security.Principal;
 
 import com.uade.tpo.Scrims.view.dto.response.ScrimResponse;
-import java.util.List; 
+import com.uade.tpo.Scrims.view.dto.response.StatisticResponseDTO;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/scrims")
@@ -75,6 +77,26 @@ public class ScrimController {
             return ResponseEntity.ok().body("Scrim finalizado y estadísticas cargadas correctamente.");
         } catch (Exception e) {
             // Devolvemos un mensaje de error claro al cliente
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/{scrimId}/cancel")
+    public ResponseEntity<?> cancelScrim(@PathVariable Long scrimId, Principal principal) {
+        try {
+            scrimService.cancelScrim(scrimId, principal.getName());
+            return ResponseEntity.ok().body("Scrim cancelado exitosamente.");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @GetMapping("/{scrimId}/statistics") // Usamos GET
+    public ResponseEntity<?> getScrimStatistics(@PathVariable Long scrimId) {
+        try {
+            List<StatisticResponseDTO> stats = scrimService.getScrimStatistics(scrimId);
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }

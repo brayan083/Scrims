@@ -8,6 +8,7 @@ import com.uade.tpo.Scrims.model.infrastructure.persistence.ScrimRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.TeamRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.UserRepository;
 import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
+import com.uade.tpo.Scrims.model.patterns.state.CanceladoState;
 import com.uade.tpo.Scrims.model.patterns.state.FinalizadoState;
 import com.uade.tpo.Scrims.model.patterns.state.LobbyArmadoState;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
@@ -18,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.uade.tpo.Scrims.view.dto.response.ScrimResponse;
+import com.uade.tpo.Scrims.view.dto.response.StatisticResponseDTO;
 
 import jakarta.transaction.Transactional;
 
@@ -109,7 +111,7 @@ public class ScrimService {
         response.setFechaHora(scrim.getFechaHora());
         response.setEstado(scrim.getEstado());
         // Aquí está el campo clave que la prueba espera
-        response.setCreadorUsername(scrim.getCreador().getUsername()); 
+        response.setCreadorUsername(scrim.getCreador().getUsername());
         return response;
     }
 
@@ -319,5 +321,54 @@ public class ScrimService {
 
         System.out.println("Scrim ID: " + scrimId + " ha sido movido al estado FINALIZADO.");
         // TODO: Publicar un evento "ScrimFinalizadoEvent".
+    }
+
+    @Transactional
+    public void cancelScrim(Long scrimId, String username) {
+        Scrim scrim = scrimRepository.findById(scrimId)
+                .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Usuario no encontrado."));
+
+        // 1. Verificación de permisos
+        if (!scrim.getCreador().getId().equals(user.getId())) {
+            throw new RuntimeException("No tienes permiso para cancelar este scrim.");
+        }
+
+        // 2. Verificación de estado
+        List<String> cancellableStates = List.of("BUSCANDO_JUGADORES", "LOBBY_ARMADO", "CONFIRMADO");
+        if (!cancellableStates.contains(scrim.getEstado())) {
+            throw new IllegalStateException("No se puede cancelar un scrim que ya está en juego o ha finalizado.");
+        }
+
+        // 3. Transición de estado
+        scrim.setState(new CanceladoState());
+        scrimRepository.save(scrim);
+
+        System.out.println("Scrim ID: " + scrimId + " ha sido CANCELADO.");
+        // TODO: Publicar un evento "ScrimCanceladoEvent" para notificar a los
+        // jugadores.
+    }
+
+    public List<StatisticResponseDTO> getScrimStatistics(Long scrimId) {
+        Scrim scrim = scrimRepository.findById(scrimId)
+                .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
+    
+        // 1. Verificación de estado
+        if (!"FINALIZADO".equals(scrim.getEstado())) {
+            throw new IllegalStateException("Las estadísticas solo están disponibles para scrims finalizados.");
+        }
+    
+        // 2. Búsqueda de estadísticas
+        List<Estadistica> stats = estadisticaRepository.findByScrimId(scrimId);
+    
+        // 3. Mapeo a DTOs
+        return stats.stream().map(stat -> {
+            StatisticResponseDTO dto = new StatisticResponseDTO();
+            dto.setUsername(stat.getUser().getUsername());
+            dto.setKda(stat.getKda());
+            dto.setMvp(stat.isMvp());
+            return dto;
+        }).collect(Collectors.toList());
     }
 }
