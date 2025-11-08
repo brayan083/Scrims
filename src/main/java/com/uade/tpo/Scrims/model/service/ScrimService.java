@@ -40,6 +40,7 @@ import com.uade.tpo.Scrims.model.domain.Postulation;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.ConfirmationRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.EstadisticaRepository;
 import com.uade.tpo.Scrims.model.infrastructure.persistence.PostulationRepository;
+import com.uade.tpo.Scrims.model.infrastructure.persistence.ScrimSpecification;
 
 @Service
 public class ScrimService {
@@ -102,27 +103,27 @@ public class ScrimService {
     }
 
     public List<ScrimResponse> searchScrims(String juego, String formato, String region, String estado) {
-        Specification<Scrim> spec = Specification.where(null);
+    Specification<Scrim> spec = ScrimSpecification.empty();
 
-        if (estado != null && !estado.isEmpty()) {
-            spec = spec.and(ScrimSpecification.tieneEstado(estado));
-        } else {
-            spec = spec.and(ScrimSpecification.tieneEstado("BUSCANDO_JUGADORES"));
-        }
-
-        if (juego != null && !juego.isEmpty()) {
-            spec = spec.and(ScrimSpecification.tieneJuego(juego));
-        }
-        if (formato != null && !formato.isEmpty()) {
-            spec = spec.and(ScrimSpecification.tieneFormato(formato));
-        }
-        if (region != null && !region.isEmpty()) {
-            spec = spec.and(ScrimSpecification.tieneRegion(region));
-        }
-
-        List<Scrim> scrims = scrimRepository.findAll(spec);
-        return scrims.stream().map(this::mapToScrimResponse).collect(Collectors.toList());
+    if (estado != null && !estado.isEmpty()) {
+        spec = spec.and(ScrimSpecification.tieneEstado(estado));
+    } else {
+        spec = spec.and(ScrimSpecification.tieneEstado("BUSCANDO_JUGADORES"));
     }
+
+    if (juego != null && !juego.isEmpty()) {
+        spec = spec.and(ScrimSpecification.tieneJuego(juego));
+    }
+    if (formato != null && !formato.isEmpty()) {
+        spec = spec.and(ScrimSpecification.tieneFormato(formato));
+    }
+    if (region != null && !region.isEmpty()) {
+        spec = spec.and(ScrimSpecification.tieneRegion(region));
+    }
+
+    List<Scrim> scrims = scrimRepository.findAll(spec);
+    return scrims.stream().map(this::mapToScrimResponse).collect(Collectors.toList());
+}
 
     public List<ScrimResponse> findScrimsByParticipant(String username) {
         User participant = userRepository.findByUsername(username)
@@ -197,7 +198,14 @@ public class ScrimService {
         response.setRangoMax(scrim.getRangoMax());
         response.setFechaHora(scrim.getFechaHora());
         response.setEstado(scrim.getEstado());
-        response.setCreadorUsername(scrim.getCreador().getUsername());
+        
+        // Verificación de nulidad para evitar NullPointerException
+        if (scrim.getCreador() != null) {
+            response.setCreadorUsername(scrim.getCreador().getUsername());
+        } else {
+            response.setCreadorUsername(null); // o un valor por defecto como "Desconocido"
+        }
+        
         return response;
     }
 

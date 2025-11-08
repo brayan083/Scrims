@@ -20,4 +20,7 @@ public interface ScrimRepository extends JpaRepository<Scrim, Long>, JpaSpecific
 
     @Query("SELECT DISTINCT t.scrim FROM Team t JOIN t.miembros m WHERE m.id = :userId ORDER BY t.scrim.fechaHora DESC")
     List<Scrim> findScrimsByParticipantId(@Param("userId") Long userId);
+
+    @Query("SELECT s FROM Scrim s JOIN FETCH s.creador WHERE s IN :scrims")
+    List<Scrim> findAllWithCreador(@Param("scrims") List<Scrim> scrims);
 }

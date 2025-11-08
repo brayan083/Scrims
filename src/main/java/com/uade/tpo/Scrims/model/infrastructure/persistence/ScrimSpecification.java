@@ -6,6 +6,11 @@ import org.springframework.data.jpa.domain.Specification;
 
 public class ScrimSpecification {
 
+    // Método auxiliar para crear una especificación base vacía
+    public static Specification<Scrim> empty() {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.conjunction();
+    }
+
     // Devuelve una "condición" que JPA usará para filtrar por juego
     public static Specification<Scrim> tieneJuego(String juego) {
         return (root, query, criteriaBuilder) ->
