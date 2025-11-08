@@ -1,8 +1,9 @@
-// Fichero: controller/ScrimController.java
+
 package com.uade.tpo.Scrims.controller;
 
 import com.uade.tpo.Scrims.model.domain.Postulation;
 import com.uade.tpo.Scrims.model.service.ScrimService;
+import com.uade.tpo.Scrims.view.dto.request.CommandRequestDTO;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
 import com.uade.tpo.Scrims.view.dto.request.FinalizeScrimRequest;
 
@@ -29,7 +30,6 @@ public class ScrimController {
     @PostMapping
     public ResponseEntity<ScrimResponse> createScrim(@RequestBody CreateScrimRequest request, Principal principal) {
         String username = principal.getName();
-        // El servicio ahora devuelve el DTO directamente
         ScrimResponse createdScrim = scrimService.createScrim(request, username);
         return ResponseEntity.status(201).body(createdScrim);
     }
@@ -40,7 +40,6 @@ public class ScrimController {
             Postulation postulation = scrimService.applyToScrim(scrimId, principal.getName());
             return ResponseEntity.status(201).body(postulation);
         } catch (RuntimeException e) {
-            // Devolvemos un error claro si la postulación falla
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
@@ -54,6 +53,19 @@ public class ScrimController {
             Postulation postulation = scrimService.acceptPostulation(scrimId, postulationId, principal.getName());
             return ResponseEntity.ok(postulation);
         } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/{scrimId}/command")
+    public ResponseEntity<?> executeScrimCommand(
+            @PathVariable Long scrimId,
+            @RequestBody CommandRequestDTO request,
+            Principal principal) {
+        try {
+            Object result = scrimService.executeCommand(scrimId, request, principal.getName());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
@@ -77,7 +89,6 @@ public class ScrimController {
             scrimService.finalizeScrim(scrimId, request, principal.getName());
             return ResponseEntity.ok().body("Scrim finalizado y estadísticas cargadas correctamente.");
         } catch (Exception e) {
-            // Devolvemos un mensaje de error claro al cliente
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
@@ -92,7 +103,7 @@ public class ScrimController {
         }
     }
 
-    @GetMapping("/{scrimId}/statistics") // Usamos GET
+    @GetMapping("/{scrimId}/statistics")
     public ResponseEntity<?> getScrimStatistics(@PathVariable Long scrimId) {
         try {
             List<StatisticResponseDTO> stats = scrimService.getScrimStatistics(scrimId);
@@ -108,8 +119,7 @@ public class ScrimController {
             @RequestParam(required = false) String formato,
             @RequestParam(required = false) String region,
             @RequestParam(required = false) String estado) {
-        
-        // Pasamos los filtros al servicio
+
         List<ScrimResponse> scrims = scrimService.searchScrims(juego, formato, region, estado);
         return ResponseEntity.ok(scrims);
     }
@@ -132,10 +142,9 @@ public class ScrimController {
             ScrimDetailResponseDTO scrimDetails = scrimService.getScrimDetails(scrimId);
             return ResponseEntity.ok(scrimDetails);
         } catch (Exception e) {
-            return ResponseEntity.status(404).body(e.getMessage()); // 404 Not Found si el scrim no existe
+            return ResponseEntity.status(404).body(e.getMessage());
         }
     }
-
 
     @GetMapping("/{scrimId}/postulations")
     public ResponseEntity<?> getPostulationsForScrim(@PathVariable Long scrimId, Principal principal) {
@@ -145,5 +154,5 @@ public class ScrimController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
-    }   
+    }
 }

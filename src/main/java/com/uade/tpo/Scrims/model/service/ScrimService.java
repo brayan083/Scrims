@@ -1,4 +1,3 @@
-
 package com.uade.tpo.Scrims.model.service;
 
 import com.uade.tpo.Scrims.model.domain.Scrim;
@@ -12,8 +11,11 @@ import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
 import com.uade.tpo.Scrims.model.patterns.state.CanceladoState;
 import com.uade.tpo.Scrims.model.patterns.state.FinalizadoState;
 import com.uade.tpo.Scrims.model.patterns.state.LobbyArmadoState;
+import com.uade.tpo.Scrims.model.patterns.command.ScrimCommand;
+import com.uade.tpo.Scrims.model.patterns.command.ScrimCommandFactory;
 import com.uade.tpo.Scrims.model.patterns.strategy.MatchmakingStrategy;
 import com.uade.tpo.Scrims.model.patterns.strategy.MatchmakingStrategyFactory;
+import com.uade.tpo.Scrims.view.dto.request.CommandRequestDTO;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
 import com.uade.tpo.Scrims.view.dto.request.FinalizeScrimRequest;
 import com.uade.tpo.Scrims.view.dto.request.PlayerStatisticDTO;
@@ -62,6 +64,8 @@ public class ScrimService {
     private ConfirmationRepository confirmationRepository;
     @Autowired
     private MatchmakingStrategyFactory strategyFactory;
+    @Autowired
+    private ScrimCommandFactory commandFactory;
 
     private static final int MMR_CHANGE_ON_WIN = 5;
     private static final int MMR_CHANGE_ON_LOSS = -5;
@@ -203,7 +207,7 @@ public class ScrimService {
         if (scrim.getCreador() != null) {
             response.setCreadorUsername(scrim.getCreador().getUsername());
         } else {
-            response.setCreadorUsername(null); // o un valor por defecto como "Desconocido"
+            response.setCreadorUsername(null);
         }
         
         return response;
@@ -251,6 +255,32 @@ public class ScrimService {
             addPlayerToLobby(scrim, postulante);
         }
         return savedPostulation;
+    }
+
+    @Transactional
+    public Object executeCommand(Long scrimId, CommandRequestDTO request, String username) {
+        Scrim scrim = scrimRepository.findById(scrimId)
+            .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
+        User creator = userRepository.findByUsername(username)
+            .orElseThrow(() -> new RuntimeException("Usuario creador no encontrado."));
+
+        if (!scrim.getCreador().getId().equals(creator.getId())) {
+            throw new RuntimeException("Acción no permitida: No eres el creador de este scrim.");
+        }
+
+        // Solo permitimos modificar el lobby antes de que empiece la partida
+        List<String> modifiableStates = List.of("BUSCANDO_JUGADORES", "LOBBY_ARMADO");
+        if (!modifiableStates.contains(scrim.getEstado())) {
+            throw new IllegalStateException("No se pueden ejecutar comandos de gestión de equipo en un scrim que ya está en juego, finalizado o cancelado.");
+        }
+
+        ScrimCommand command = commandFactory.createCommand(request, scrimId);
+
+        try {
+            return command.execute();
+        } catch (Exception e) {
+            throw new RuntimeException("Error al ejecutar el comando: " + e.getMessage(), e);
+        }
     }
 
     /**
