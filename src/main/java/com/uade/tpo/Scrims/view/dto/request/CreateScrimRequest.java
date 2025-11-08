@@ -12,4 +12,5 @@ public class CreateScrimRequest {
     private Integer rangoMin;
     private Integer rangoMax;
     private LocalDateTime fechaHora;
+    private String matchmakingStrategy;
 }

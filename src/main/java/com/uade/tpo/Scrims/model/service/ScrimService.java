@@ -1,4 +1,4 @@
-// Fichero: model/service/ScrimService.java
+
 package com.uade.tpo.Scrims.model.service;
 
 import com.uade.tpo.Scrims.model.domain.Scrim;
@@ -12,6 +12,8 @@ import com.uade.tpo.Scrims.model.patterns.state.BuscandoJugadoresState;
 import com.uade.tpo.Scrims.model.patterns.state.CanceladoState;
 import com.uade.tpo.Scrims.model.patterns.state.FinalizadoState;
 import com.uade.tpo.Scrims.model.patterns.state.LobbyArmadoState;
+import com.uade.tpo.Scrims.model.patterns.strategy.MatchmakingStrategy;
+import com.uade.tpo.Scrims.model.patterns.strategy.MatchmakingStrategyFactory;
 import com.uade.tpo.Scrims.view.dto.request.CreateScrimRequest;
 import com.uade.tpo.Scrims.view.dto.request.FinalizeScrimRequest;
 import com.uade.tpo.Scrims.view.dto.request.PlayerStatisticDTO;
@@ -49,24 +51,21 @@ public class ScrimService {
     private PostulationRepository postulationRepository;
     @Autowired
     private TeamRepository teamRepository;
-    // Inyecta los beans de estado que creamos para que puedan acceder a los
-    // repositorios
     @Autowired
     private BuscandoJugadoresState buscandoJugadoresState;
     @Autowired
     private LobbyArmadoState lobbyArmadoState;
     @Autowired
     private EstadisticaRepository estadisticaRepository;
-
     @Autowired
     private ConfirmationRepository confirmationRepository;
+    @Autowired
+    private MatchmakingStrategyFactory strategyFactory;
 
-    // Definimos una constante para el cambio de MMR
     private static final int MMR_CHANGE_ON_WIN = 5;
     private static final int MMR_CHANGE_ON_LOSS = -5;
 
-    // 1. La firma del método ahora acepta un 'username'
-    @Transactional // Es bueno usarlo aquí también
+    @Transactional
     public ScrimResponse createScrim(CreateScrimRequest request, String username) {
         User creador = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Creador no encontrado."));
@@ -81,21 +80,19 @@ public class ScrimService {
         newScrim.setState(new BuscandoJugadoresState());
         newScrim.setCreador(creador);
 
-        // Guardamos el scrim primero para que tenga un ID
+        String strategy = (request.getMatchmakingStrategy() != null && !request.getMatchmakingStrategy().isEmpty())
+                ? request.getMatchmakingStrategy()
+                : "MANUAL";
+        newScrim.setMatchmakingStrategy(strategy);
+
         Scrim savedScrim = scrimRepository.save(newScrim);
 
-        // Creamos el Equipo A
         Team teamA = new Team();
         teamA.setScrim(savedScrim);
         teamA.setNombre("Equipo A");
-
-        // --- ¡EL CAMBIO CLAVE ESTÁ AQUÍ! ---
-        // Añadimos al creador como el primer miembro del Equipo A.
         teamA.getMiembros().add(creador);
+        teamRepository.save(teamA);
 
-        teamRepository.save(teamA); // Guardamos el Equipo A con su primer miembro
-
-        // Creamos el Equipo B (vacío)
         Team teamB = new Team();
         teamB.setScrim(savedScrim);
         teamB.setNombre("Equipo B");
@@ -105,20 +102,14 @@ public class ScrimService {
     }
 
     public List<ScrimResponse> searchScrims(String juego, String formato, String region, String estado) {
-        // 1. Empezamos con una especificación base que no filtra NADA.
         Specification<Scrim> spec = Specification.where(null);
 
-        // 2. Aplicamos el filtro de estado. Si no se proporciona, usamos el valor por
-        // defecto.
         if (estado != null && !estado.isEmpty()) {
             spec = spec.and(ScrimSpecification.tieneEstado(estado));
         } else {
-            // COMPORTAMIENTO POR DEFECTO: Si no se pide un estado, mostramos solo las que
-            // buscan jugadores.
             spec = spec.and(ScrimSpecification.tieneEstado("BUSCANDO_JUGADORES"));
         }
 
-        // 3. Añadimos el resto de los filtros dinámicamente
         if (juego != null && !juego.isEmpty()) {
             spec = spec.and(ScrimSpecification.tieneJuego(juego));
         }
@@ -129,20 +120,16 @@ public class ScrimService {
             spec = spec.and(ScrimSpecification.tieneRegion(region));
         }
 
-        // ... (El resto del método para ejecutar la consulta y mapear a DTOs no cambia)
         List<Scrim> scrims = scrimRepository.findAll(spec);
         return scrims.stream().map(this::mapToScrimResponse).collect(Collectors.toList());
     }
 
     public List<ScrimResponse> findScrimsByParticipant(String username) {
-        // 1. Buscamos al usuario que está haciendo la petición para obtener su ID
         User participant = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado."));
 
-        // 2. Usamos el nuevo método del repositorio para obtener los scrims
         List<Scrim> scrims = scrimRepository.findScrimsByParticipantId(participant.getId());
 
-        // 3. Mapeamos la lista de entidades a la lista de DTOs para la respuesta
         return scrims.stream().map(this::mapToScrimResponse).collect(Collectors.toList());
     }
 
@@ -156,22 +143,15 @@ public class ScrimService {
     }
 
     public ScrimDetailResponseDTO getScrimDetails(Long scrimId) {
-        // 1. Buscamos el scrim principal
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
-                // --- ¡MEJORA IMPORTANTE! ---
-        // Para ser eficientes, obtenemos TODAS las confirmaciones para este scrim
-        // en una sola consulta a la base de datos, en lugar de consultar por cada
-        // jugador.
-        // Creamos un Set de IDs de usuarios confirmados para una búsqueda rápida.
+
         Set<Long> confirmedUserIds = confirmationRepository.findByScrimId(scrimId).stream()
                 .map(confirmation -> confirmation.getUser().getId())
                 .collect(Collectors.toSet());
 
-        // 2. Buscamos sus equipos asociados
         List<Team> teams = teamRepository.findByScrimId(scrimId);
 
-        // 3. Mapeamos toda la información al DTO de detalle
         ScrimDetailResponseDTO responseDTO = new ScrimDetailResponseDTO();
         responseDTO.setId(scrim.getId());
         responseDTO.setJuego(scrim.getJuego());
@@ -183,7 +163,6 @@ public class ScrimService {
         responseDTO.setEstado(scrim.getEstado());
         responseDTO.setCreadorUsername(scrim.getCreador().getUsername());
 
-        // Mapeamos la lista de equipos y sus miembros
         List<TeamResponseDTO> teamDTOs = teams.stream().map(team -> {
             TeamResponseDTO teamDTO = new TeamResponseDTO();
             teamDTO.setId(team.getId());
@@ -195,7 +174,7 @@ public class ScrimService {
                 memberDTO.setUsername(member.getUsername());
                 memberDTO.setUserRank(member.getRango());
                 memberDTO.setHaConfirmado(confirmedUserIds.contains(member.getId()));
-                
+
                 return memberDTO;
             }).collect(Collectors.toList());
 
@@ -208,7 +187,6 @@ public class ScrimService {
         return responseDTO;
     }
 
-    // Método de ayuda privado para la conversión
     private ScrimResponse mapToScrimResponse(Scrim scrim) {
         ScrimResponse response = new ScrimResponse();
         response.setId(scrim.getId());
@@ -219,57 +197,60 @@ public class ScrimService {
         response.setRangoMax(scrim.getRangoMax());
         response.setFechaHora(scrim.getFechaHora());
         response.setEstado(scrim.getEstado());
-        // Aquí está el campo clave que la prueba espera
         response.setCreadorUsername(scrim.getCreador().getUsername());
         return response;
     }
 
+    @Transactional
     public Postulation applyToScrim(Long scrimId, String username) {
-        // Buscamos el scrim y el usuario
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado"));
         User postulante = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
-        // --- REGLAS DE NEGOCIO ---
-        // 1. Un usuario no puede postularse a su propio scrim
         if (scrim.getCreador().getId().equals(postulante.getId())) {
             throw new IllegalStateException("No puedes postularte a tu propio scrim.");
         }
 
-        // 2. El scrim debe estar buscando jugadores
         if (!"BUSCANDO_JUGADORES".equals(scrim.getEstado())) {
             throw new IllegalStateException("Este scrim no acepta postulaciones actualmente.");
         }
 
-        // --- ¡NUEVA VALIDACIÓN DE DUPLICADOS! ---
         if (postulationRepository.existsByScrimIdAndPostulanteId(scrimId, postulante.getId())) {
             throw new IllegalStateException("Ya te has postulado a este scrim.");
         }
 
-        // 3. --- ¡NUEVA VALIDACIÓN DE RANGO! ---
-        if (postulante.getRango() == null) {
-            throw new IllegalStateException("Tu perfil debe tener un rango para poder postularte.");
-        }
-        if (postulante.getRango() < scrim.getRangoMin() || postulante.getRango() > scrim.getRangoMax()) {
+        MatchmakingStrategy strategy = strategyFactory.getStrategy(scrim.getMatchmakingStrategy());
+        String nuevoEstado = strategy.procesarPostulacion(postulante, scrim);
+        if ("RECHAZADA".equals(nuevoEstado)) {
             throw new IllegalStateException(
-                    "Tu rango (" + postulante.getRango() + ") no está dentro de los límites del scrim ["
-                            + scrim.getRangoMin() + "-" + scrim.getRangoMax() + "].");
+                    "Tu postulación fue rechazada automáticamente por la estrategia del scrim (ej. no cumples el rango).");
         }
 
         Postulation newPostulation = new Postulation();
         newPostulation.setScrim(scrim);
         newPostulation.setPostulante(postulante);
-        newPostulation.setEstado("PENDIENTE");
+        newPostulation.setEstado(nuevoEstado);
 
-        return postulationRepository.save(newPostulation);
+        Postulation savedPostulation = postulationRepository.save(newPostulation);
+
+        if ("ACEPTADA".equals(nuevoEstado)) {
+            // Si la estrategia aceptó automáticamente al jugador (ej. ByMMRStrategy)
+            // Lo añadimos al lobby inmediatamente.
+            System.out.println("[ScrimService] Postulación " + savedPostulation.getId()
+                    + " aceptada automáticamente. Añadiendo al lobby...");
+
+            addPlayerToLobby(scrim, postulante);
+        }
+        return savedPostulation;
     }
 
-    @Transactional // Anotación para asegurar que todas las operaciones de BBDD se completen o
+    /**
+     * Reemplaza el estado en memoria con el bean de Spring para que tenga acceso a los repositorios.
+     */
+    @Transactional
     public Postulation acceptPostulation(Long scrimId, Long postulationId, String creatorUsername) {
 
-        // 1. --- BÚSQUEDA DE ENTIDADES ---
-        // Obtenemos todas las entidades necesarias de la base de datos.
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
 
@@ -279,46 +260,37 @@ public class ScrimService {
         Postulation postulation = postulationRepository.findById(postulationId)
                 .orElseThrow(() -> new RuntimeException("Postulación no encontrada con ID: " + postulationId));
 
-        // 2. --- VERIFICACIÓN DE PERMISOS ---
-        // La regla de negocio más importante: solo el creador puede gestionar su scrim.
         if (!scrim.getCreador().getId().equals(creator.getId())) {
-            // En una app real, aquí se lanzaría una excepción de seguridad más específica
-            // (ej. AccessDeniedException)
             throw new RuntimeException("Acción no permitida: No eres el creador de este scrim.");
         }
 
-        // 3. --- INTEGRACIÓN CON EL PATRÓN STATE ---
-        // El objeto 'scrim' cargado de la BBDD tiene un estado 'puro' (creado con
-        // 'new').
-        // Ese estado 'puro' no tiene sus dependencias (@Autowired) inyectadas.
-        // Aquí reemplazamos el estado 'puro' con el bean de estado gestionado por
-        // Spring,
-        // que sí tiene acceso a los repositorios.
-        if (scrim.getCurrentState() instanceof BuscandoJugadoresState) {
-            scrim.setCurrentState(buscandoJugadoresState);
-        }
-        // (Aquí irían otros 'else if' para otros estados que puedan manejar esta
-        // acción)
+        addPlayerToLobby(scrim, postulation.getPostulante());
 
-        // 4. --- DELEGACIÓN DE LA LÓGICA ---
-        // El servicio ya no sabe CÓMO se acepta un jugador. Simplemente le dice al
-        // scrim que lo haga.
-        // El objeto de estado actual (BuscandoJugadoresState en este caso) se encargará
-        // de todo.
         scrim.aceptarPostulacion(postulation.getPostulante());
 
-        // 5. --- PERSISTENCIA DE CAMBIOS ---
-        // Actualizamos el estado de la postulación a "ACEPTADA".
         postulation.setEstado("ACEPTADA");
         postulationRepository.save(postulation);
-
-        // MUY IMPORTANTE: Guardamos el scrim para persistir cualquier cambio de estado
-        // que haya ocurrido dentro del objeto State (ej. cambiar de BUSCANDO a
-        // LOBBY_ARMADO).
         scrimRepository.save(scrim);
 
-        // 6. --- DEVOLUCIÓN DEL RESULTADO ---
         return postulation;
+    }
+
+    /**
+     * Añade un jugador al lobby. Reemplaza el estado en memoria con el bean de Spring.
+     * No realiza chequeos de permisos.
+     */
+    private void addPlayerToLobby(Scrim scrim, User postulante) {
+        if (scrim.getCurrentState() instanceof BuscandoJugadoresState) {
+            scrim.setCurrentState(buscandoJugadoresState);
+        } else {
+            if (scrim.getCurrentState() == null) {
+                scrim.setCurrentState(buscandoJugadoresState);
+            }
+        }
+
+        scrim.aceptarPostulacion(postulante);
+
+        scrimRepository.save(scrim);
     }
 
     @Transactional
@@ -328,22 +300,18 @@ public class ScrimService {
         User jugador = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
 
-        // Inyectamos las dependencias al estado actual
         if (scrim.getCurrentState() instanceof LobbyArmadoState) {
             scrim.setCurrentState(lobbyArmadoState);
         }
 
-        // Delegamos la acción al estado
         scrim.confirmarParticipacion(jugador);
 
-        // Guardamos el scrim para persistir el cambio de estado si ocurre
         scrimRepository.save(scrim);
     }
 
     @Transactional
     public void finalizeScrim(Long scrimId, FinalizeScrimRequest request, String username) {
 
-        // 1. --- BÚSQUEDA DE ENTIDADES Y VALIDACIÓN DE PERMISOS ---
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
 
@@ -354,13 +322,11 @@ public class ScrimService {
             throw new RuntimeException("Acción no permitida: No eres el creador de este scrim.");
         }
 
-        // 2. --- VALIDACIÓN DE ESTADO ---
         if (!"EN_JUEGO".equals(scrim.getEstado())) {
             throw new IllegalStateException(
                     "El scrim no se puede finalizar porque no está en juego. Estado actual: " + scrim.getEstado());
         }
 
-        // 3. --- CARGAR ESTADÍSTICAS ---
         System.out.println("Finalizando Scrim ID: " + scrimId + ". Resultado: " + request.getResultado());
         for (PlayerStatisticDTO statDTO : request.getPlayerStats()) {
             User player = userRepository.findById(statDTO.getUserId())
@@ -377,7 +343,6 @@ public class ScrimService {
             System.out.println("Estadística guardada para el jugador: " + player.getUsername());
         }
 
-        // 4. --- RECALCULO DE MMR (RANGO) ---
         List<Team> teams = teamRepository.findByScrimId(scrimId);
         if (teams.size() < 2) {
             throw new IllegalStateException(
@@ -398,11 +363,9 @@ public class ScrimService {
             perdedores = teamA.getMiembros();
         } else {
             System.out.println("Resultado es EMPATE o no reconocido. No se ajustará el MMR.");
-            // Si no hay un ganador claro, simplemente finalizamos el scrim sin cambiar
-            // rangos.
             scrim.setState(new FinalizadoState());
             scrimRepository.save(scrim);
-            return; // Salimos del método aquí.
+            return;
         }
 
         System.out.println("--- Actualizando MMR ---");
@@ -417,19 +380,17 @@ public class ScrimService {
         for (User perdedor : perdedores) {
             int nuevoRango = perdedor.getRango() + MMR_CHANGE_ON_LOSS;
             if (nuevoRango < 0)
-                nuevoRango = 0; // El MMR no puede ser negativo.
+                nuevoRango = 0;
             System.out.println(
                     "Jugador " + perdedor.getUsername() + " (perdedor): " + perdedor.getRango() + " -> " + nuevoRango);
             perdedor.setRango(nuevoRango);
             userRepository.save(perdedor);
         }
 
-        // 5. --- TRANSICIÓN DE ESTADO FINAL ---
         scrim.setState(new FinalizadoState());
         scrimRepository.save(scrim);
 
         System.out.println("Scrim ID: " + scrimId + " ha sido movido al estado FINALIZADO.");
-        // TODO: Publicar un evento "ScrimFinalizadoEvent".
     }
 
     @Transactional
@@ -439,39 +400,31 @@ public class ScrimService {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado."));
 
-        // 1. Verificación de permisos
         if (!scrim.getCreador().getId().equals(user.getId())) {
             throw new RuntimeException("No tienes permiso para cancelar este scrim.");
         }
 
-        // 2. Verificación de estado
         List<String> cancellableStates = List.of("BUSCANDO_JUGADORES", "LOBBY_ARMADO", "CONFIRMADO");
         if (!cancellableStates.contains(scrim.getEstado())) {
             throw new IllegalStateException("No se puede cancelar un scrim que ya está en juego o ha finalizado.");
         }
 
-        // 3. Transición de estado
         scrim.setState(new CanceladoState());
         scrimRepository.save(scrim);
 
         System.out.println("Scrim ID: " + scrimId + " ha sido CANCELADO.");
-        // TODO: Publicar un evento "ScrimCanceladoEvent" para notificar a los
-        // jugadores.
     }
 
     public List<StatisticResponseDTO> getScrimStatistics(Long scrimId) {
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
 
-        // 1. Verificación de estado
         if (!"FINALIZADO".equals(scrim.getEstado())) {
             throw new IllegalStateException("Las estadísticas solo están disponibles para scrims finalizados.");
         }
 
-        // 2. Búsqueda de estadísticas
         List<Estadistica> stats = estadisticaRepository.findByScrimId(scrimId);
 
-        // 3. Mapeo a DTOs
         return stats.stream().map(stat -> {
             StatisticResponseDTO dto = new StatisticResponseDTO();
             dto.setUsername(stat.getUser().getUsername());
@@ -482,7 +435,6 @@ public class ScrimService {
     }
 
     public List<PostulationResponseDTO> getPostulationsForScrim(Long scrimId, String username) {
-        // 1. --- BÚSQUEDA Y VALIDACIÓN DE PERMISOS ---
         Scrim scrim = scrimRepository.findById(scrimId)
                 .orElseThrow(() -> new RuntimeException("Scrim no encontrado con ID: " + scrimId));
         User requester = userRepository.findByUsername(username)
@@ -492,11 +444,8 @@ public class ScrimService {
             throw new RuntimeException("No tienes permiso para ver las postulaciones de este scrim.");
         }
 
-        // 2. --- BÚSQUEDA DE DATOS ---
         List<Postulation> postulations = postulationRepository.findByScrimId(scrimId);
 
-        // 3. --- MAPEADO A DTOs ---
-        // Convertimos la lista de entidades a una lista de DTOs para la respuesta
         return postulations.stream().map(postulation -> {
             PostulationResponseDTO dto = new PostulationResponseDTO();
             User postulante = postulation.getPostulante();

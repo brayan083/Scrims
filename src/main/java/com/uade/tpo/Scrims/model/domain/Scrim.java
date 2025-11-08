@@ -22,55 +22,50 @@ public class Scrim {
     private Long id;
 
     private String juego;
-    private String formato; // "5v5", "1v1", etc.
+    private String formato;
     private String region;
     private Integer rangoMin;
     private Integer rangoMax;
     private LocalDateTime fechaHora;
-    private String estado; // "BUSCANDO_JUGADORES", "COMPLETO", etc.
+    private String estado;
+    private String matchmakingStrategy;
 
-    @Transient // Le decimos a JPA que no guarde este campo en la BBDD
-    @JsonIgnore // Ignoramos el campo en las respuestas JSON para evitar recursividad
+    @Transient
+    @JsonIgnore
     private ScrimState currentState;
 
-    @ManyToOne // Un usuario puede crear muchos scrims
+    @ManyToOne
     @JoinColumn(name = "creador_id", nullable = false)
     private User creador;
 
-    // Este método se ejecuta automáticamente después de que un Scrim se carga de la
-    // BBDD
-    @PostLoad // Se ejecuta después de que el objeto se carga de la BBDD
+    @PostLoad
     private void initState() {
-        // La lógica del Scheduler usa el estado del String, así que esta parte
-        // es más para cuando manipulas el objeto en otras partes del código.
-        // Pero es bueno asegurarse de que esté completo.
         if ("LOBBY_ARMADO".equals(this.estado)) {
             this.currentState = new LobbyArmadoState();
-        } else if ("CONFIRMADO".equals(this.estado)) { // <-- Añadir este bloque
+        } else if ("CONFIRMADO".equals(this.estado)) {
             this.currentState = new ConfirmadoState();
-        } else if ("EN_JUEGO".equals(this.estado)) { // <-- Añadir este bloque
+        } else if ("EN_JUEGO".equals(this.estado)) {
             this.currentState = new EnJuegoState();
-        } else if ("FINALIZADO".equals(this.estado)) { // <-- Añadir este bloque
+        } else if ("FINALIZADO".equals(this.estado)) {
             this.currentState = new FinalizadoState();
         } else {
-            // Estado por defecto
             this.currentState = new BuscandoJugadoresState();
         }
     }
 
-    // Método para cambiar de estado de forma segura
+    /**
+     * Sincroniza el estado en memoria (State pattern) con el campo persistente.
+     * Convierte CamelCase a SNAKE_CASE (ej: BuscandoJugadoresState -> BUSCANDO_JUGADORES).
+     */
     public void setState(ScrimState newState) {
         this.currentState = newState;
 
-        // Convertimos de CamelCase a SNAKE_CASE para la persistencia.
-        // Ej: "BuscandoJugadoresState" -> "BuscandoJugadores" -> "BUSCANDO_JUGADORES"
         String stateName = newState.getClass().getSimpleName().replace("State", "");
         String snakeCaseState = stateName.replaceAll("([a-z])([A-Z]+)", "$1_$2").toUpperCase();
 
         this.estado = snakeCaseState;
     }
 
-    // --- Métodos que delegan el comportamiento al estado actual ---
     public void aceptarPostulacion(User postulante) {
         this.currentState.aceptarPostulacion(this, postulante);
     }
