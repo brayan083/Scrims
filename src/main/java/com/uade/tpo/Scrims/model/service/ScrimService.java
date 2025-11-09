@@ -304,8 +304,6 @@ public class ScrimService {
 
         addPlayerToLobby(scrim, postulation.getPostulante());
 
-        scrim.aceptarPostulacion(postulation.getPostulante());
-
         postulation.setEstado("ACEPTADA");
         postulationRepository.save(postulation);
         scrimRepository.save(scrim);
